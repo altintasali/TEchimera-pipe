@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Chimera sample-QC: normalize the gene-TE junction counts matrix and produce
-# the PCA + clustering views shipped by sample_qc.smk.
+# the PCA + sample-distance views shipped by sample_qc.smk.
 #
 # Two modes, selected by the script's argument vector:
 #   --transform counts.tsv samples.csv transform min_samples_present \
@@ -13,15 +13,18 @@
 #       seen in fewer than min_samples_present samples, or with fewer than
 #       min_total_counts supporting reads overall, are dropped for this view
 #       only.
-#   --plots transformed.tsv samples.csv min_events out_pca.svg out_heatmap.svg
-#       PCA + pheatmap of the transformed matrix, colored by the sample sheet's
-#       "condition" column (all samples colored by their own group; samples
-#       without a condition are treated as one group).
+#   --plots transformed.tsv samples.csv min_events transform \
+#                 out_pca_mqc.json out_heatmap_mqc.json
+#       PCA scatter + sample-to-sample Euclidean-distance heatmap of the
+#       transformed matrix, written as MultiQC custom-content JSON documents
+#       (the `_mqc.json` suffix makes multiqc_report.html render them
+#       interactively). PCA points are colored by the sample sheet's
+#       "condition" column; samples without a condition form one group.
 #
 # QC filters (chimera.qc in the config) apply ONLY to this view: the all_events
 # catalog and the counts matrix are never reduced.
-# Libraries are loaded per-mode (DESeq2 for the transform, pheatmap for the
-# plots) so a transform-only run doesn't need pheatmap and vice versa.
+# Libraries are loaded per-mode (DESeq2 for the transform); the plots mode
+# needs no extra packages -- the JSON payloads are small and built by hand.
 suppressMessages(library(DESeq2))
 
 read_counts <- function(path) {
@@ -89,10 +92,104 @@ load_conditions <- function(samples_path) {
     setNames(as.character(cond), as.character(sheet$sample))
 }
 
-write_svg <- function(path, width, height, expr) {
-    svg(path, width = width, height = height)
-    expr
-    dev.off()
+# --- MultiQC custom-content JSON writers -------------------------------------
+# The plots mode emits two documents MultiQC picks up by the `_mqc.json`
+# suffix (results/chimera/qc/*_mqc.json) and renders as an interactive
+# scatter (PCA) and heatmap (sample distances). Hand-built JSON: the payloads
+# are small and fixed, and the QC env needs no extra JSON dependency.
+
+json_escape <- function(x) gsub('([\\\\"])', '\\\\\\1', x)
+json_num <- function(x) sprintf("%.6g", as.numeric(x))
+json_str_arr <- function(x) paste(sprintf('"%s"', json_escape(x)), collapse = ", ")
+
+write_pca_mqc <- function(path, samples, x, y, colors, pc1, pc2, transform, note = NULL) {
+    pts <- vapply(seq_along(samples), function(i) {
+        sprintf('"%s": {"x": %s, "y": %s, "color": "%s"}',
+                json_escape(samples[i]), json_num(x[i]), json_num(y[i]), colors[i])
+    }, character(1))
+    desc <- if (is.null(note)) {
+        sprintf(paste0("Principal-component analysis of the %s-transformed ",
+                       "chimera counts matrix, colored by sample condition."),
+                transform)
+    } else {
+        note
+    }
+    body <- paste0(
+        '{\n',
+        '  "id": "chimera_sample_qc_pca",\n',
+        '  "section_name": "Chimera sample-QC: PCA",\n',
+        sprintf('  "description": "%s",\n', json_escape(desc)),
+        '  "plot_type": "scatter",\n',
+        '  "pconfig": {\n',
+        '    "id": "chimera_pca_plot",\n',
+        '    "title": "Chimera counts: PCA",\n',
+        sprintf('    "xlab": "PC1 (%s%%)",\n', json_num(pc1)),
+        sprintf('    "ylab": "PC2 (%s%%)"\n', json_num(pc2)),
+        '  },\n',
+        sprintf('  "data": {%s}\n', paste(pts, collapse = ", ")),
+        '}\n'
+    )
+    writeLines(body, path)
+}
+
+write_heatmap_mqc <- function(path, samples, d, transform, note = NULL) {
+    desc <- if (is.null(note)) {
+        sprintf(paste0("Pairwise Euclidean distances between samples on the ",
+                       "%s-transformed chimera counts matrix."),
+                transform)
+    } else {
+        note
+    }
+    rows <- apply(d, 1, function(r) paste0('[', paste(json_num(r), collapse = ", "), ']'))
+    body <- paste0(
+        '{\n',
+        '  "id": "chimera_sample_qc_heatmap",\n',
+        '  "section_name": "Chimera sample-QC: sample distances",\n',
+        sprintf('  "description": "%s",\n', json_escape(desc)),
+        '  "plot_type": "heatmap",\n',
+        '  "pconfig": {\n',
+        '    "id": "chimera_heatmap_plot",\n',
+        '    "title": "Euclidean distance between samples"\n',
+        '  },\n',
+        sprintf('  "ycats": [%s],\n', json_str_arr(samples)),
+        sprintf('  "xcats": [%s],\n', json_str_arr(samples)),
+        sprintf('  "data": [%s]\n', paste(rows, collapse = ",\n    ")),
+        '}\n'
+    )
+    writeLines(body, path)
+}
+
+write_empty_mqc <- function(path, kind) {
+    # Valid custom-content documents for the no-data case, so the multiqc rule
+    # always sees its inputs and the report still documents why nothing is
+    # plotted.
+    note <- "No chimeric events passed the QC-view filters; plot skipped."
+    body <- if (kind == "scatter") {
+        paste0(
+            '{\n',
+            '  "id": "chimera_sample_qc_pca",\n',
+            '  "section_name": "Chimera sample-QC: PCA",\n',
+            sprintf('  "description": "%s",\n', json_escape(note)),
+            '  "plot_type": "scatter",\n',
+            '  "pconfig": {"id": "chimera_pca_plot", "title": "Chimera counts: PCA"},\n',
+            '  "data": {}\n',
+            '}\n'
+        )
+    } else {
+        paste0(
+            '{\n',
+            '  "id": "chimera_sample_qc_heatmap",\n',
+            '  "section_name": "Chimera sample-QC: sample distances",\n',
+            sprintf('  "description": "%s",\n', json_escape(note)),
+            '  "plot_type": "heatmap",\n',
+            '  "pconfig": {"id": "chimera_heatmap_plot", "title": "Euclidean distance between samples"},\n',
+            '  "ycats": [],\n',
+            '  "xcats": [],\n',
+            '  "data": []\n',
+            '}\n'
+        )
+    }
+    writeLines(body, path)
 }
 
 do_transform <- function(argv) {
@@ -130,8 +227,9 @@ do_plots <- function(argv) {
     matrix_path <- argv[2]
     samples_path <- argv[3]
     min_events <- as.integer(argv[4])
-    out_pca <- argv[5]
-    out_heatmap <- argv[6]
+    transform <- argv[5]
+    out_pca <- argv[6]
+    out_heatmap <- argv[7]
 
     sz <- file.info(matrix_path)$size
     tmat <- if (!is.na(sz) && sz > 0) {
@@ -140,19 +238,15 @@ do_plots <- function(argv) {
         # the transform writes a 0-byte file when nothing passed its QC filter
         matrix(nrow = 0, ncol = 0)
     }
-    placeholder <- function(msg) {
+    empty <- function(msg) {
         message(msg)
-        for (p in c(out_pca, out_heatmap)) {
-            svg(p, width = 6, height = 6)
-            plot.new()
-            text(0.5, 0.5, sprintf("< %d events, QC view skipped", min_events))
-            dev.off()
-        }
+        write_empty_mqc(out_pca, "scatter")
+        write_empty_mqc(out_heatmap, "heatmap")
         quit(save = "no", status = 0)
     }
     if (ncol(tmat) < 2) {
-        # a single sample can't support a PCA or a clustering view
-        placeholder("only one sample; skipping PCA/heatmap")
+        # a single sample can't support a PCA or a sample-distance view
+        empty("only one sample; skipping PCA/heatmap")
     }
     # Events that transform to a constant (or NaN/Inf) column carry no signal
     # and make prcomp(scale.=TRUE) fail outright, so drop them for the QC view.
@@ -164,9 +258,9 @@ do_plots <- function(argv) {
     }
     tmat <- tmat[finite_rows & var_rows, , drop = FALSE]
     if (nrow(tmat) < max(min_events, 2)) {
-        # too few events for a meaningful PCA/clustering view; ship empty
-        # outputs rather than a cryptic DESeq2/pheatmap error.
-        placeholder(sprintf("fewer than %d events; skipping PCA/heatmap", min_events))
+        # too few events for a meaningful PCA/distance view; ship empty custom
+        # content rather than a cryptic prcomp error.
+        empty(sprintf("fewer than %d events; skipping PCA/heatmap", min_events))
     }
 
     conditions <- load_conditions(samples_path)
@@ -177,29 +271,17 @@ do_plots <- function(argv) {
     pca <- prcomp(t(tmat), center = TRUE, scale. = TRUE)
     pc1 <- round(100 * summary(pca)$importance[2, 1], 1)
     pc2 <- round(100 * summary(pca)$importance[2, 2], 1)
-    scores <- as.data.frame(pca$x)
-    scores$sample <- rownames(scores)
-    scores$condition <- groups
 
-    write_svg(out_pca, 7, 6, {
-        palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
-                     "#D55E00", "#CC79A7")
-        cols <- setNames(palette[seq_along(unique(groups))], unique(groups))
-        plot(scores[, 1], scores[, 2], col = cols[groups], pch = 19, cex = 1.4,
-             xlab = sprintf("PC1 (%.1f%%)", pc1),
-             ylab = sprintf("PC2 (%.1f%%)", pc2),
-             main = "Chimera sample-QC: PCA")
-        text(scores[, 1], scores[, 2], labels = scores$sample, pos = 3, cex = 0.7)
-        legend("topright", legend = names(cols), col = cols, pch = 19, cex = 0.8)
-    })
+    palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                 "#D55E00", "#CC79A7")
+    ugroups <- unique(groups)
+    group_colors <- setNames(palette[seq_along(ugroups)], ugroups)
+    point_colors <- unname(group_colors[groups])
 
-    annot <- data.frame(row.names = samples, condition = groups)
-    # Loaded lazily: the placeholder path above never needs pheatmap.
-    suppressMessages(library(pheatmap))
-    write_svg(out_heatmap, 8, 8, {
-        pheatmap(tmat, annotation_col = annot, show_colnames = TRUE,
-                 show_rownames = FALSE, main = "Chimera sample-QC: clustering")
-    })
+    write_pca_mqc(out_pca, samples, pca$x[, 1], pca$x[, 2], point_colors,
+                  pc1, pc2, transform)
+
+    write_heatmap_mqc(out_heatmap, samples, as.matrix(dist(t(tmat))), transform)
 }
 
 args <- commandArgs(trailingOnly = TRUE)

@@ -57,8 +57,8 @@ def all_sample_qc_outputs():
     transform = CHIMERA_QC["pca_transform"]
     return [
         f"results/chimera/qc/{transform}_counts.tsv",
-        f"results/chimera/qc/pca_{transform}.svg",
-        f"results/chimera/qc/heatmap_{transform}.svg",
+        f"results/chimera/qc/pca_{transform}_mqc.json",
+        f"results/chimera/qc/heatmap_{transform}_mqc.json",
     ]
 
 

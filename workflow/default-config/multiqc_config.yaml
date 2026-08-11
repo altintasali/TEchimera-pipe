@@ -20,11 +20,13 @@ extra_fn_clean_exts:
   - "_trimmed"
 
 # Order report sections by the analysis flow: raw QC -> trimming -> alignment
-# -> strandedness -> versions. FastQC appears twice (raw input
-# and, when trimming is enabled, the TrimGalore!-run reports), disambiguated
-# by path_filters on the output directories. The resource-usage summary
-# (custom content emitted by the benchmark_summary rule, qc.smk) closes the
-# report.
+# -> strandedness -> chimera sample-QC -> versions. FastQC appears twice (raw
+# input and, when trimming is enabled, the TrimGalore!-run reports),
+# disambiguated by path_filters on the output directories. The chimera QC
+# custom-content sections (ids chimera_sample_qc_pca / chimera_sample_qc_heatmap,
+# emitted by the sample_qc rule) sit inside their own parent section. The
+# resource-usage summary (custom content emitted by the benchmark_summary rule,
+# qc.smk) closes the report.
 module_order:
   - fastqc:
       name: "FastQC (raw input)"
@@ -38,3 +40,13 @@ module_order:
   - star
   - rseqc
   - custom_content
+
+# Order of the custom-content sections (the chimera sample-QC PCA + distance
+# views and the benchmark/resource summary) within the custom_content module;
+# without this their order is arbitrary. Section ids come from the `_mqc.json`
+# documents emitted by the sample_qc and benchmark_summary rules.
+custom_content:
+  order:
+    - chimera_sample_qc_pca
+    - chimera_sample_qc_heatmap
+    - resource_usage

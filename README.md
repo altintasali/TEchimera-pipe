@@ -72,9 +72,10 @@ optionally trims with TrimGalore!, aligns with STAR (with its chimeric-alignment
 detection enabled), and auto-detects library strandedness from the sorted BAM.
 Per sample, chimeric junctions are annotated against the gene and TE tracks into
 an event table; the per-sample tables merge into an all-events catalog and a
-counts matrix, and a DESeq2-normalized PCA / sample-clustering view is produced
+counts matrix, and a DESeq2-normalized PCA / sample-distance view is produced
 for the sample-level QC. A single MultiQC report pulls together FastQC,
-TrimGalore!, STAR, RSeQC, tool versions, and a per-rule resource-usage table.
+TrimGalore!, STAR, RSeQC, the interactive chimera QC plots, tool versions, and
+a per-rule resource-usage table.
 
 ## Table of contents
 
@@ -213,7 +214,7 @@ reference):
 | `fastq_1` | yes | read 1 / single-end fastq(.gz). |
 | `fastq_2` | no | read 2 fastq(.gz); leave empty for single-end. Paired and single-end samples can be mixed. |
 | `strandedness` | no | per-sample override: `auto`, `forward`, `reverse`, `unstranded` (`no` works too). Blank = `auto`. |
-| `condition` | no | biological group label, used to color the sample-QC PCA/clustering view. If absent, all samples are treated as one group. |
+| `condition` | no | biological group label, used to color the sample-QC PCA / sample-distance view. If absent, all samples are treated as one group. |
 
 All rows of a lane-split sample must agree on `strandedness` and `condition`,
 and every row must include both `fastq_1` and `fastq_2` (single-end lanes
@@ -469,12 +470,14 @@ The per-sample tables then merge into:
 If `chimera.outputs.write_counts_matrix` is on (default), a **sample-QC view**
 is produced with DESeq2 (nf-core/rnaseq style): the counts matrix is
 transformed (`vst`/`rlog`/`log2`, `chimera.qc.pca_transform`), and the
-transformed matrix drives a PCA and a sample-clustering heatmap colored by the
-sample sheet's `condition` column. The `chimera.qc` filters
-(`min_samples_present`, `min_total_counts`, `min_events`) apply **only to this
-QC view** — the event catalog and counts matrix are never reduced. If too few
-events pass the filters, the plot rule ships placeholder SVGs and a log message
-instead of failing.
+transformed matrix drives a PCA scatter and a sample-to-sample distance
+heatmap, written as MultiQC custom-content JSON and rendered interactively
+inside `multiqc_report.html` (points colored by the sample sheet's
+`condition` column). The `chimera.qc` filters (`min_samples_present`,
+`min_total_counts`, `min_events`) apply **only to this QC view** — the event
+catalog and counts matrix are never reduced. If too few events pass the
+filters, the plot rule ships empty custom-content JSON (the report documents
+the skip) and a log message instead of failing.
 
 With `chimera.outputs.write_igv_bed: true`, each sample also gets a BED track
 of its gene-TE junctions (`results/chimera/igv/{sample}_junctions.bed`) for
@@ -514,10 +517,10 @@ results/
 │   └── qc/
 │       ├── {sample}_junction_qc.tsv                # per-sample junction QC summary
 │       ├── {transform}_counts.tsv                  # DESeq2 vst/rlog or log2 matrix
-│       ├── pca_{transform}.svg                     # sample PCA, colored by condition
-│       └── heatmap_{transform}.svg                 # sample clustering heatmap
+│       ├── pca_{transform}_mqc.json                # PCA scatter (-> MultiQC)
+│       └── heatmap_{transform}_mqc.json            # sample-distance heatmap (-> MultiQC)
 ├── versions/techimera_mqc_versions.yml             # pinned tool versions -> MultiQC
-├── qc/multiqc_report.html                          # FastQC + STAR + RSeQC + resource usage
+├── qc/multiqc_report.html                          # FastQC + STAR + RSeQC + chimera QC + resources
 └── pipeline_info/
     ├── benchmarks/<rule>/...                       # per-rule CPU/RSS usage (-> MultiQC)
     ├── benchmark_summary_mqc.json                  # "Resource usage" table (see below)

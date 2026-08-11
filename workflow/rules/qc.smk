@@ -72,22 +72,42 @@ rule benchmark_summary:
         "../scripts/benchmark_summary.py"
 
 
+def _chimera_qc_mqc_inputs():
+    """MultiQC custom-content JSONs from the chimera sample-QC view (rendered
+    as interactive PCA + sample-distance plots). Only when the view runs,
+    which requires a counts matrix. Their directory is added to the MultiQC
+    scan dirs via params.indirs."""
+    if not WRITE_COUNTS:
+        return []
+    transform = CHIMERA_QC["pca_transform"]
+    return [
+        f"results/chimera/qc/pca_{transform}_mqc.json",
+        f"results/chimera/qc/heatmap_{transform}_mqc.json",
+    ]
+
+
 rule multiqc:
     # Aggregates STAR alignment logs, (if trimming is enabled) TrimGalore!
     # + FastQC reports, the always-on raw FastQC reports, (if strandedness
-    # auto-detection was used) RSeQC infer_experiment.py reports, the
-    # per-rule benchmark/resource summary, and the pinned tool versions into
-    # one HTML report. Runs the MultiQC version pinned in
-    # config["versions"]["multiqc"]. The custom config (multiqc_config.yaml)
-    # trims "_val_1"/"_val_2"/"_trimmed" off the FastQC sample names so every
-    # module's rows merge into one clean row per sample in General Stats.
+    # auto-detection was used) RSeQC infer_experiment.py reports, the chimera
+    # sample-QC custom content (PCA + sample distances), the per-rule
+    # benchmark/resource summary, and the pinned tool versions into one HTML
+    # report. Runs the MultiQC version pinned in config["versions"]["multiqc"].
+    # The custom config (multiqc_config.yaml) trims "_val_1"/"_val_2"/"_trimmed"
+    # off the FastQC sample names so every module's rows merge into one clean
+    # row per sample in General Stats.
     input:
-        expand("results/star/{sample}_Log.final.out", sample=SAMPLES),
-        expand("results/rseqc/{sample}_infer_experiment.txt", sample=AUTO_SAMPLES),
-        all_fastqc_reports(),
-        all_raw_fastqc_reports(),
-        "results/pipeline_info/benchmark_summary_mqc.json",
-        "results/versions/techimera_mqc_versions.yml",
+        lambda wc: (
+            expand("results/star/{sample}_Log.final.out", sample=SAMPLES)
+            + expand("results/rseqc/{sample}_infer_experiment.txt", sample=AUTO_SAMPLES)
+            + all_fastqc_reports()
+            + all_raw_fastqc_reports()
+            + [
+                "results/pipeline_info/benchmark_summary_mqc.json",
+                "results/versions/techimera_mqc_versions.yml",
+            ]
+            + _chimera_qc_mqc_inputs()
+        ),
     output:
         html="results/qc/multiqc_report.html",
         data=directory("results/qc/multiqc_report_data"),

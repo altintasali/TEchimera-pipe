@@ -1,16 +1,18 @@
 # -----------------------------------------------------------------------------
-# Chimera sample-QC: PCA / sample-clustering view of the chimera counts
+# Chimera sample-QC: PCA / sample-distance views of the chimera counts
 # matrix (results/chimera/counts_matrix.tsv), DESeq2-normalized
-# (vst/rlog) or log2, colored by the sample sheet's "condition" column.
+# (vst/rlog) or log2. The views are written as MultiQC custom-content JSON
+# (pca_{transform}_mqc.json, heatmap_{transform}_mqc.json) and rendered
+# interactively inside multiqc_report.html.
 #
 # Rules:
 #   sample_qc_transform  normalize the counts matrix for the QC view
-#   sample_qc            PCA + clustering plots from the transformed matrix
+#   sample_qc            PCA + sample-distance plots from the transformed matrix
 #
 # QC filters (chimera.qc: min_samples_present / min_total_counts / min_events
 # / pca_transform) apply ONLY to this view -- the all-events catalog and the
 # counts matrix are never reduced. Both rules run in the dedicated R env
-# (CHIMERA_QC_ENV, common.smk): deseq2 + r-pheatmap.
+# (CHIMERA_QC_ENV, common.smk): deseq2.
 # -----------------------------------------------------------------------------
 rule sample_qc_transform:
     input:
@@ -39,13 +41,14 @@ rule sample_qc_transform:
 
 
 rule sample_qc:
-    # PCA + clustering heatmap of the transformed counts, colored by
-    # condition (sample sheet's "condition" column; absent -> one "all" group).
+    # PCA scatter + sample-to-sample distance heatmap of the transformed
+    # counts, colored by condition (sample sheet's "condition" column; absent
+    # -> one "all" group), emitted as MultiQC custom-content JSON.
     input:
         transformed="results/chimera/qc/{transform}_counts.tsv",
     output:
-        pca="results/chimera/qc/pca_{transform}.svg",
-        heatmap="results/chimera/qc/heatmap_{transform}.svg",
+        pca="results/chimera/qc/pca_{transform}_mqc.json",
+        heatmap="results/chimera/qc/heatmap_{transform}_mqc.json",
     params:
         samples=config["samples"],
         min_events=CHIMERA_QC["min_events"],
@@ -62,4 +65,4 @@ rule sample_qc:
     shell:
         "Rscript {SCRIPTS_DIR}/chimera_sample_qc.R "
         "--plots {input.transformed} {params.samples} {params.min_events} "
-        "{output.pca} {output.heatmap} > {log} 2>&1"
+        "{wildcards.transform} {output.pca} {output.heatmap} > {log} 2>&1"
