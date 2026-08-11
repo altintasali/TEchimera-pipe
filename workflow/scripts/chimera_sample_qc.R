@@ -113,10 +113,8 @@ do_plots <- function(argv) {
     out_heatmap <- argv[6]
 
     tmat <- as.matrix(read.delim(matrix_path, row.names = 1, check.names = FALSE))
-    if (nrow(tmat) < max(min_events, 2)) {
-        # too few events for a meaningful PCA/clustering view; ship empty
-        # outputs rather than a cryptic DESeq2/pheatmap error.
-        message(sprintf("fewer than %d events; skipping PCA/heatmap", min_events))
+    placeholder <- function(msg) {
+        message(msg)
         for (p in c(out_pca, out_heatmap)) {
             svg(p, width = 6, height = 6)
             plot.new()
@@ -124,6 +122,24 @@ do_plots <- function(argv) {
             dev.off()
         }
         quit(save = "no", status = 0)
+    }
+    if (ncol(tmat) < 2) {
+        # a single sample can't support a PCA or a clustering view
+        placeholder("only one sample; skipping PCA/heatmap")
+    }
+    # Events that transform to a constant (or NaN/Inf) column carry no signal
+    # and make prcomp(scale.=TRUE) fail outright, so drop them for the QC view.
+    finite_rows <- apply(tmat, 1, function(row) all(is.finite(row)))
+    var_rows <- apply(tmat, 1, var, na.rm = TRUE) > 0
+    dropped <- sum(!(finite_rows & var_rows))
+    if (dropped > 0) {
+        message(sprintf("dropping %d zero-variance/non-finite event(s) from the QC view", dropped))
+    }
+    tmat <- tmat[finite_rows & var_rows, , drop = FALSE]
+    if (nrow(tmat) < max(min_events, 2)) {
+        # too few events for a meaningful PCA/clustering view; ship empty
+        # outputs rather than a cryptic DESeq2/pheatmap error.
+        placeholder(sprintf("fewer than %d events; skipping PCA/heatmap", min_events))
     }
 
     conditions <- load_conditions(samples_path)
