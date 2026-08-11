@@ -71,6 +71,7 @@ jobs:
               --notes "Release $version of techimera-pipe, including the pre-built Linux x86_64 conda environment (\`...-env.tar.gz\`). Install it with \`./workflow/scripts/install-env.sh\` -- see the README \"Pre-built environment\" section." \
               --verify-tag \
               --target "${{ github.sha }}"
+          fi
 
   validate:
     needs: pack
@@ -93,4 +94,3 @@ jobs:
           "$P/bin/Rscript" -e 'suppressMessages(library(DESeq2)); library(pheatmap); cat("R deps OK\n")'
           "$P/bin/python" workflow/scripts/techimera-pipe --version
           echo "OK: pre-built env for $version is valid"
-          fi
