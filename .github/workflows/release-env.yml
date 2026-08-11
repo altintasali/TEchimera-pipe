@@ -10,6 +10,8 @@ permissions:
 jobs:
   pack:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,4 +71,26 @@ jobs:
               --notes "Release $version of techimera-pipe, including the pre-built Linux x86_64 conda environment (\`...-env.tar.gz\`). Install it with \`./workflow/scripts/install-env.sh\` -- see the README \"Pre-built environment\" section." \
               --verify-tag \
               --target "${{ github.sha }}"
+
+  validate:
+    needs: pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exercise the exact user install path end to end against the fresh
+      # release: download via install-env.sh, verify SHA256SUMS, extract,
+      # conda-unpack (its internal sanity check imports snakemake), then smoke
+      # the pipeline tools the env must ship.
+      - name: Install the pre-built env from the release and smoke it
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          version="${{ needs.pack.outputs.version }}"
+          P="$RUNNER_TEMP/techimera-pipe-env"
+          bash workflow/scripts/install-env.sh -r "$version" -o "$P"
+          "$P/bin/STAR" --version
+          "$P/bin/Rscript" -e 'suppressMessages(library(DESeq2)); library(pheatmap); cat("R deps OK\n")'
+          "$P/bin/python" workflow/scripts/techimera-pipe --version
+          echo "OK: pre-built env for $version is valid"
           fi
