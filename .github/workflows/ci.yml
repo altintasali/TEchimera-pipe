@@ -65,6 +65,18 @@ jobs:
             tail -30 /tmp/index_dryrun.log
             exit 1
           fi
+      - name: Upload test outputs
+        # Even on failure the chimera stage's logs/matrices are worth keeping
+        # for debugging (the tiny test fixture makes this artifact a few KB).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            results/chimera/
+            results/pipeline_info/logs/chimera/
+            results/star/*_Chimeric.out.junction
+          if-no-files-found: ignore
 
   guards:
     # Negative tests for the parse-time startup checks in common.smk: each
