@@ -1,0 +1,23 @@
+.snakemake/
+
+# Generated at runtime, not part of the repo
+/results/
+.conda/
+.DS_Store
+*.pyc
+__pycache__/
+workflow/envs/generated/
+
+# Build artifact from README.md (pandoc); keep only the source in the repo
+README.html
+
+# Per-project user files -- create from the .example templates (see README).
+# input/ holds everything that belongs to your analysis (config.yaml,
+# samples.csv, version/resource overrides, reference fasta/gtf/te_gtf), so
+# keeping it untracked means each clone is a clean project and `git pull`
+# never conflicts with your analysis settings.
+/input/
+
+# Test profile: keep the committed fixtures under .tests/resources/, but
+# not the STAR index it builds there at run time
+.tests/resources/star_index/

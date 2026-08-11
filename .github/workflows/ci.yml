@@ -1,0 +1,217 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  flowchart:
+    # Keeps the README's Mermaid flowchart in sync with the actual rules: the
+    # generator is deterministic (rulegraph of the bundled test config), so a
+    # diff means the committed diagram is stale.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: techimera-pipe
+          environment-file: workflow/environment.yaml
+          channel-priority: flexible
+      - shell: bash -l {0}
+        run: |
+          snakemake --configfile config/test.yaml --rulegraph | python workflow/scripts/flowchart.py --update-readme
+          git diff --exit-code -- README.md
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: techimera-pipe
+          environment-file: workflow/environment.yaml
+          channel-priority: flexible
+      - shell: bash -l {0}
+        run: |
+          snakemake --configfile config/test.yaml --cores 2
+          test -f .tests/resources/star_index/.refs_used.txt
+          # index was built for sjdb_overhang=49; a different value must warn,
+          # and the matching value must NOT warn. Capture dry-run output to a
+          # file so a failure here is diagnosable instead of swallowed by a pipe.
+          sed 's/  sjdb_overhang: 49/  sjdb_overhang: 48/' config/test.yaml > /tmp/stale_index.yaml
+          if snakemake --configfile /tmp/stale_index.yaml -n > /tmp/stale_index_dryrun.log 2>&1; then
+            if grep -q "built for a different" /tmp/stale_index_dryrun.log; then
+              echo "OK: stale-index warning fired for sjdb_overhang=48"
+            else
+              echo "ERROR: stale-index warning did not fire for sjdb_overhang=48 (dry-run log tail below)"
+              tail -30 /tmp/stale_index_dryrun.log
+              exit 1
+            fi
+          else
+            echo "ERROR: dry-run with sjdb_overhang=48 failed to run (log tail below)"
+            tail -30 /tmp/stale_index_dryrun.log
+            exit 1
+          fi
+          if snakemake --configfile config/test.yaml -n > /tmp/index_dryrun.log 2>&1; then
+            if grep -q "built for a different" /tmp/index_dryrun.log; then
+              echo "ERROR: stale-index warning fired although sjdb_overhang matches (log tail below)"
+              tail -30 /tmp/index_dryrun.log
+              exit 1
+            fi
+            echo "OK: no stale-index warning for matching sjdb_overhang=49"
+          else
+            echo "ERROR: dry-run with matching sjdb_overhang=49 failed to run (log tail below)"
+            tail -30 /tmp/index_dryrun.log
+            exit 1
+          fi
+
+  guards:
+    # Negative tests for the parse-time startup checks in common.smk: each
+    # step asserts the documented behavior, including the ones that must FAIL
+    # (missing reference / already-trimmed fastqs).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: techimera-pipe
+          environment-file: workflow/environment.yaml
+          channel-priority: flexible
+      - shell: bash -l {0}
+        run: |
+          # GitHub Actions' runner executes this block under `set -e` and
+          # injects a `/usr/bin/clear_console -q` call into the exit path.
+          # That helper exits non-zero on non-TTY runners, so under `set -e`
+          # it flipped an otherwise fully-passing run (all 10 checks done,
+          # FAIL=0) into a zero-output "Process completed with exit code 1"
+          # -- the unexplained guards failure on main. This script reports
+          # its own failures via $FAIL and `exit $FAIL`, so -e is explicitly
+          # disabled here; -u and pipefail are kept.
+          set +e -uo pipefail
+          T=$(mktemp -d)
+          FAIL=0
+          echo "[guards] 1/10 missing reference"
+
+          # --- a missing/typo'd reference is a hard parse-time error ---------
+          sed 's|  fasta: .*|  fasta: /nonexistent/ref.fa|' config/test.yaml > "$T/missing_ref.yaml"
+          if snakemake --configfile "$T/missing_ref.yaml" -n --cores 1 >"$T/missing_ref.log" 2>&1; then
+            echo "ERROR: missing reference did not fail the run"; FAIL=1
+          elif ! grep -q "Missing reference file(s)" "$T/missing_ref.log"; then
+            echo "ERROR: wrong failure message for missing reference"; FAIL=1
+          fi
+
+          echo "[guards] 2/10 already-trimmed fastqs"
+
+          # --- already-trimmed-looking fastqs are rejected while trimming on --
+          printf 'sample,fastq_1,fastq_2,strandedness,condition\nzyg_wt_01,zyg_wt_01_trimmed.fq.gz,,auto,wt\n' > "$T/trimmed.csv"
+          sed "s|samples: .*|samples: $T/trimmed.csv|" config/test.yaml > "$T/trimmed.yaml"
+          if snakemake --configfile "$T/trimmed.yaml" -n --cores 1 >"$T/trimmed.log" 2>&1; then
+            echo "ERROR: already-trimmed fastqs did not fail the run"; FAIL=1
+          elif ! grep -q "already look trimmed" "$T/trimmed.log"; then
+            echo "ERROR: wrong failure message for already-trimmed fastqs"; FAIL=1
+          fi
+
+          echo "[guards] 3/10 node-local decompressed_dir, plain refs"
+
+          # --- node-local decompressed_dir is fine with plain refs ------------
+          # (no gunzip_reference jobs run, so the setting is dead config)
+          sed 's|  sjdb_overhang: 49|  sjdb_overhang: 49\n  decompressed_dir: /tmp/rnaseq-decompressed|' config/test.yaml > "$T/tmpdir_plain.yaml"
+          if ! snakemake --configfile "$T/tmpdir_plain.yaml" -n --cores 1 >"$T/tmpdir_plain.log" 2>&1; then
+            echo "ERROR: node-local decompressed_dir with plain refs must still dry-run"; FAIL=1
+          fi
+
+          echo "[guards] 4/10 gzipped refs, default decompressed_dir"
+
+          # --- gzipped references: make .gz copies of the test refs ------------
+          gzip -c .tests/resources/genome.fa > "$T/genome.fa.gz"
+          gzip -c .tests/resources/genome.gtf > "$T/genome.gtf.gz"
+          gzip -c .tests/resources/te_annotation.gtf > "$T/te_annotation.gtf.gz"
+          sed -e "s|  fasta: .*|  fasta: $T/genome.fa.gz|" \
+              -e "s|  gtf: .*|  gtf: $T/genome.gtf.gz|" \
+              -e "s|  te_gtf: .*|  te_gtf: $T/te_annotation.gtf.gz|" \
+              config/test.yaml > "$T/gz.yaml"
+
+          # --- gz refs + default decompressed_dir: dry-run must succeed --------
+          if ! snakemake --configfile "$T/gz.yaml" -n --cores 1 >"$T/gz.log" 2>&1; then
+            echo "ERROR: gzipped refs with default decompressed_dir must dry-run"; FAIL=1
+          fi
+
+          echo "[guards] 5/10 gz refs + node-local decompressed_dir"
+
+          # --- gz refs + node-local /tmp decompressed_dir: hard parse error ----
+          sed 's|  sjdb_overhang: 49|  sjdb_overhang: 49\n  decompressed_dir: /tmp/rnaseq-decompressed|' "$T/gz.yaml" > "$T/gz_tmpdir.yaml"
+          if snakemake --configfile "$T/gz_tmpdir.yaml" -n --cores 1 >"$T/gz_tmpdir.log" 2>&1; then
+            echo "ERROR: gz refs + node-local decompressed_dir did not fail the run"; FAIL=1
+          elif ! grep -q "node-local temp directory" "$T/gz_tmpdir.log"; then
+            echo "ERROR: wrong failure message for gz refs + node-local decompressed_dir"; FAIL=1
+          fi
+
+          echo "[guards] 6/10 gz refs + empty decompressed_dir"
+
+          # --- gz refs + empty decompressed_dir: hard parse error ---------------
+          sed 's|  sjdb_overhang: 49|  sjdb_overhang: 49\n  decompressed_dir: ""|' "$T/gz.yaml" > "$T/gz_empty.yaml"
+          if snakemake --configfile "$T/gz_empty.yaml" -n --cores 1 >"$T/gz_empty.log" 2>&1; then
+            echo "ERROR: gz refs + empty decompressed_dir did not fail the run"; FAIL=1
+          elif ! grep -q "(empty)" "$T/gz_empty.log"; then
+            echo "ERROR: wrong failure message for gz refs + empty decompressed_dir"; FAIL=1
+          fi
+
+          echo "[guards] 7/10 star.index omitted"
+
+          # --- star.index omitted: defaults to generated results/star_index -----
+          sed '/^  index: .*star_index$/d' config/test.yaml > "$T/no_index.yaml"
+          if ! snakemake --configfile "$T/no_index.yaml" -n --cores 1 >"$T/no_index.log" 2>&1; then
+            echo "ERROR: omitted star.index must dry-run (default results/star_index)"; FAIL=1
+          elif ! grep -q "results/star_index" "$T/no_index.log"; then
+            echo "ERROR: default star index path results/star_index not used"; FAIL=1
+          fi
+
+          echo "[guards] 8/10 star.index empty"
+
+          # --- star.index empty string: same default applies --------------------
+          sed 's|^  index: .*|  index: ""|' config/test.yaml > "$T/empty_index.yaml"
+          if ! snakemake --configfile "$T/empty_index.yaml" -n --cores 1 >"$T/empty_index.log" 2>&1; then
+            echo "ERROR: empty star.index must dry-run (default results/star_index)"; FAIL=1
+          fi
+
+          echo "[guards] 9/10 CLI samples generator"
+
+          # --- the samples CLI must reproduce the committed fixture -----------
+          # (same rows, order-insensitive; generated paths are absolute while
+          # the fixture's are relative, so compare basenames)
+          python workflow/scripts/techimera-pipe samples --reads .tests/reads --dry-run > "$T/cli_sheet.csv" 2> "$T/cli_samples.err"
+          if [ $? -ne 0 ]; then
+            echo "ERROR: samples generator failed"; cat "$T/cli_samples.err"; FAIL=1
+          else
+            norm() { grep -v '^#' "$1" | grep -v '^sample,' | cut -d, -f1-3 | sed -E 's|,[^,]*/|,|g' | sort; }
+            norm "$T/cli_sheet.csv" > "$T/cli_norm.txt"
+            norm .tests/samples.csv > "$T/fixture_norm.txt"
+            if ! diff "$T/cli_norm.txt" "$T/fixture_norm.txt" > /dev/null; then
+              echo "ERROR: samples generator output differs from the committed fixture"
+              diff "$T/cli_norm.txt" "$T/fixture_norm.txt"
+              FAIL=1
+            fi
+          fi
+
+          echo "[guards] 10/10 CLI run --dry-run"
+
+          # --- CLI run must scaffold config + sheet and pass a real dry-run ---
+          python workflow/scripts/techimera-pipe run \
+            --config "$T/cli/config.yaml" --samplesheet "$T/cli/samples.csv" \
+            --reads .tests/reads \
+            --fasta .tests/resources/genome.fa \
+            --gtf .tests/resources/genome.gtf \
+            --te-gtf .tests/resources/te_annotation.gtf \
+            --cores 2 --dry-run > "$T/cli_run.log" 2>&1
+          CLI_RC=$?
+          if [ $CLI_RC -ne 0 ]; then
+            echo "ERROR: CLI run --dry-run failed (exit $CLI_RC)"; tail -40 "$T/cli_run.log"; FAIL=1
+          elif ! grep -q "dry-run OK" "$T/cli_run.log"; then
+            echo "ERROR: CLI run --dry-run did not report success"; tail -40 "$T/cli_run.log"; FAIL=1
+          elif ! grep -q "Job stats:" "$T/cli_run.log" || ! grep -q "chimera_counts" "$T/cli_run.log"; then
+            echo "ERROR: CLI run --dry-run planned no jobs (chimera_counts missing from the DAG)"; tail -40 "$T/cli_run.log"; FAIL=1
+          fi
+
+          echo "[guards] done, FAIL=$FAIL"
+          exit $FAIL

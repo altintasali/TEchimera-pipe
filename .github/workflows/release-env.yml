@@ -1,0 +1,72 @@
+name: release-env
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: techimera-pipe
+          environment-file: workflow/environment.yaml
+          channel-priority: flexible
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack environment with conda-pack
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          echo "CONDA_PREFIX=${CONDA_PREFIX:?not set (env not activated)}"
+          command -v conda && conda --version
+          "${CONDA_PREFIX}/bin/pip" install -q conda-pack
+          "${CONDA_PREFIX}/bin/conda-pack" -p "${CONDA_PREFIX}" \
+            -o "techimera-pipe-${{ steps.version.outputs.version }}-env.tar.gz"
+
+      - name: Split or checksum
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          tarball="techimera-pipe-${{ steps.version.outputs.version }}-env.tar.gz"
+          # GitHub Releases caps each asset at 2 GiB; split if we're close.
+          if (( $(stat -c %s "$tarball") > 1900000000 )); then
+            split -b 1500M "$tarball" "$tarball.part."
+            rm "$tarball"
+          fi
+          sha256sum "$tarball"* > SHA256SUMS
+          ls -lh "$tarball"* SHA256SUMS
+
+      - name: Attach to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          stem="techimera-pipe-${version}-env.tar.gz"
+          assets=()
+          for a in "$stem"* SHA256SUMS; do
+            [[ -e "$a" ]] && assets+=("$a")
+          done
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release upload "$version" "${assets[@]}" --clobber
+          else
+            gh release create "$version" "${assets[@]}" \
+              --title "Release $version" \
+              --notes "Release $version of techimera-pipe, including the pre-built Linux x86_64 conda environment (\`...-env.tar.gz\`). Install it with \`./workflow/scripts/install-env.sh\` -- see the README \"Pre-built environment\" section." \
+              --verify-tag \
+              --target "${{ github.sha }}"
+          fi

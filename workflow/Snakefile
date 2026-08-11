@@ -1,0 +1,87 @@
+import os
+
+from snakemake.utils import min_version
+
+min_version("8.0")
+
+
+# Built-in defaults, part of the workflow itself -- not meant to be edited
+# or even looked at for a first run. See "Tool versions" / "HPC / SLURM" in
+# the README to override any of these instead.
+configfile: "workflow/default-config/versions.yaml"
+configfile: "workflow/default-config/resources.yaml"
+
+# Your analysis config. Unlike the defaults above, this one belongs to you:
+# input/config.yaml (and input/samples.csv) are gitignored, so create them
+# from the .example templates shipped in config/ before running:
+#   cp config/config.example.yaml input/config.yaml
+#   cp config/samples.example.csv input/samples.csv
+# If you already provide your own config via --configfile on the command
+# line (workflow.overwrite_configfiles), that is enough and
+# input/config.yaml is optional.
+if os.path.exists("input/config.yaml"):
+
+    configfile: "input/config.yaml"
+
+elif not workflow.overwrite_configfiles:
+    raise RuntimeError(
+        "input/config.yaml is missing and no --configfile was given.\n"
+        "Copy the templates and fill them in:\n"
+        "  cp config/config.example.yaml input/config.yaml\n"
+        "  cp config/samples.example.csv input/samples.csv\n"
+        "then edit the paths/options and re-run."
+    )
+
+# Optional user overrides: only loaded if you create them yourself, and only
+# need to contain the keys you want to change -- deep-merged on top of the
+# built-in defaults above. See "Tool versions" / "HPC / SLURM" in the README.
+if os.path.exists("input/versions.yaml"):
+
+    configfile: "input/versions.yaml"
+
+
+if os.path.exists("input/resources.yaml"):
+
+    configfile: "input/resources.yaml"
+
+
+include: "rules/common.smk"
+include: "rules/ref.smk"
+include: "rules/fastq.smk"
+include: "rules/trimming.smk"
+include: "rules/align.smk"
+include: "rules/strandedness.smk"
+include: "rules/chimera.smk"
+include: "rules/sample_qc.smk"
+include: "rules/software_versions.smk"
+include: "rules/qc.smk"
+
+
+rule all:
+    input:
+        all_chimera_outputs(),
+        all_sample_qc_outputs(),
+        "results/qc/multiqc_report.html",
+
+
+rule star_index_only:
+    # Convenience target: just (re)build the STAR genome index.
+    input:
+        STAR_INDEX_DIR,
+
+
+rule strandedness_only:
+    # Convenience target: run just alignment + strandedness auto-detection
+    # for samples that need it (effective mode "auto"), useful for
+    # sanity-checking a new sample sheet before the chimera screen.
+    input:
+        expand("results/rseqc/{sample}_strandedness.txt", sample=AUTO_SAMPLES),
+
+
+rule trimming_only:
+    # Convenience target: run just the fastq merge + TrimGalore! trimming
+    # steps (nothing after that -- no alignment/chimera detection), useful
+    # for QC-ing the reads before committing to a full run. Automatically
+    # pulls in the lane-merging step for lane-split samples.
+    input:
+        all_trim_outputs(),

@@ -1,0 +1,150 @@
+# =============================================================================
+# BUILT-IN DEFAULT per-rule compute resources -- threads (CPUs), memory
+# (MB), and runtime (minutes). Part of the workflow itself, loaded
+# automatically. You should NOT normally need to edit this file.
+#
+# To override one or more entries for your own cluster/dataset, create
+# input/resources.yaml containing just the rules/keys you want to change
+# (it's deep-merged on top of this file, so a partial override is fine, e.g.
+# just `resources: {star_align: {mem_mb: 64000}}`). See "HPC / SLURM" in the
+# README.
+#
+# Every rule reads its entry here via get_resources("<rule_name>") in
+# common.smk; a rule missing from this file (or a missing key within an
+# entry) falls back to the _default entry below rather than failing. Values
+# below are reasonable starting points for a human genome / typical bulk
+# RNA-seq run -- adjust to your organism, read depth, and cluster.
+# =============================================================================
+resources:
+  _default:
+    threads: 1
+    mem_mb: 4000
+    runtime: 60
+  gunzip_reference:
+    threads: 1
+    mem_mb: 2000
+    runtime: 30
+
+  # Lane/run merging (cat): single-threaded, streaming I/O.
+  cat_fastq:
+    threads: 1
+    mem_mb: 1000
+    runtime: 120
+
+  # TrimGalore! + FastQC: TrimGalore! passes --cores {threads} through to
+  # cutadapt and runs FastQC inside, so both single-end (trim_galore_se) and
+  # paired-end (trim_galore_pe) rules are sized from 4 threads. Modest CPU;
+  # I/O bound.
+  trim_galore_pe:
+    threads: 4
+    mem_mb: 8000
+    runtime: 180
+
+  trim_galore_se:
+    threads: 4
+    mem_mb: 8000
+    runtime: 180
+
+  # Always-on raw FastQC (per sample/read): modest CPU/memory; I/O bound.
+  # FastQC -t 1 is enough; a second core is wasted.
+  fastqc_raw:
+    threads: 1
+    mem_mb: 2000
+    runtime: 30
+
+  star_index:
+    # Peak memory for STAR genome index generation scales with genome size;
+    # ~32-40GB is typical for a human/mouse-sized genome (SA index).
+    threads: 8
+    mem_mb: 40000
+    runtime: 180
+
+  gtf_to_genepred:
+    threads: 1
+    mem_mb: 2000
+    runtime: 30
+
+  genepred_to_bed12:
+    threads: 1
+    mem_mb: 2000
+    runtime: 30
+
+  star_align:
+    # STAR keeps the whole genome index in memory per job; ~2.5x the index's
+    # on-disk size is a safe estimate for human/mouse.
+    threads: 12
+    mem_mb: 32000
+    runtime: 240
+
+  samtools_sort:
+    # Coordinate sorting is I/O-bound in practice; measured runs used <=3
+    # cores regardless of allocation, so 4 threads suffice. -m per-thread
+    # memory scales with threads (see align.smk), keeping total under mem_mb.
+    threads: 4
+    mem_mb: 16000
+    runtime: 120
+
+  samtools_index:
+    threads: 2
+    mem_mb: 4000
+    runtime: 30
+
+  rseqc_infer_experiment:
+    threads: 1
+    mem_mb: 4000
+    runtime: 60
+
+  determine_strandedness:
+    threads: 1
+    mem_mb: 1000
+    runtime: 10
+
+  annotation_to_bed:
+    # Pure-python GTF->BED conversion; single-threaded, small.
+    threads: 1
+    mem_mb: 2000
+    runtime: 30
+
+  parse_chimeric_junctions:
+    # Annotating a junction file against the gene/TE tracks; single-threaded.
+    threads: 1
+    mem_mb: 8000
+    runtime: 120
+
+  chimera_counts:
+    # Merging per-sample junction tables; single-threaded, streaming I/O.
+    threads: 1
+    mem_mb: 4000
+    runtime: 30
+
+  junction_qc:
+    threads: 1
+    mem_mb: 2000
+    runtime: 15
+
+  chimera_igv_bed:
+    threads: 1
+    mem_mb: 2000
+    runtime: 15
+
+  sample_qc_transform:
+    # DESeq2 vst/rlog on the chimera counts matrix; R is single-threaded.
+    threads: 1
+    mem_mb: 8000
+    runtime: 60
+
+  sample_qc:
+    # PCA + pheatmap in R; single-threaded.
+    threads: 1
+    mem_mb: 8000
+    runtime: 30
+
+  multiqc:
+    threads: 1
+    mem_mb: 4000
+    runtime: 30
+
+  benchmark_summary:
+    threads: 1
+    mem_mb: 2000
+    runtime: 10

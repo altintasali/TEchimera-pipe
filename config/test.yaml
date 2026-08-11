@@ -1,0 +1,109 @@
+# =============================================================================
+# Test profile -- runs the whole workflow end-to-end in a couple of minutes
+# on a laptop, against the tiny synthetic dataset in .tests/ (a 50kb
+# single-contig genome, 100 genes, one TE, 4 samples). Mirrors nf-core's
+# `-profile test`: no real genome/reads needed, just a sanity check that
+# every step runs and wires together correctly.
+#
+# Usage:
+#   snakemake --configfile config/test.yaml --cores 4 -n   # dry-run
+#   snakemake --configfile config/test.yaml --cores 4      # run
+#
+# This is deep-merged on top of input/config.yaml (and the built-in
+# defaults) -- only the keys that need to differ for the test dataset are
+# listed below.
+# =============================================================================
+samples: .tests/samples.csv
+
+ref:
+  fasta: .tests/resources/genome.fa
+  gtf: .tests/resources/genome.gtf
+  te_gtf: .tests/resources/te_annotation.gtf
+  # 50kb contig -- read length (50bp) - 1 would work too, but "auto" also
+  # detects fine here; pinned explicitly just to keep the test deterministic
+  # and independent of read-length changes in generate_test_data.py.
+  sjdb_overhang: 49
+
+star:
+  index: .tests/resources/star_index
+  # REQUIRED for small genomes, or STAR either refuses to start or (worse)
+  # crashes with "double free or corruption" / segfaults while writing the
+  # SAindex -- this is a well-documented STAR limitation on small/custom
+  # references, not specific to this workflow (see e.g. alexdobin/STAR
+  # issues #2158, #965, #1472, #350, #972). Both values follow STAR's own
+  # formulas (manual section 2.2.5): genomeSAindexNbases =
+  # min(14, log2(genomeLength)/2 - 1), genomeChrBinNbits =
+  # min(18, log2(genomeLength)) -- for this 50kb test genome that's 6 and
+  # 15. Re-run .tests/generate_test_data.py to get updated values if you
+  # resize the test genome; it prints the recommended flags.
+  index_extra: "--genomeSAindexNbases 6 --genomeChrBinNbits 15"
+  # Plain alignment is fine for the synthetic test data (only one TE).
+  extra: ""
+  # Explicit here just to exercise the config option; the default is /tmp.
+  tmpdir: /tmp
+
+trimming:
+  enabled: true
+  trim_nextseq: 0
+  extra: ""
+
+# Analysis-wide settings. Normally these come from input/config.yaml (see
+# config/config.example.yaml); they're repeated here so the test profile is
+# self-sufficient on a fresh clone / in CI, where input/config.yaml has not
+# been created yet.
+strandedness:
+  min_fraction: 0.6
+
+# Exercise the temp() fastq-removal path in CI: the merged + trimmed fastqs
+# are deleted once alignment is done (the FastQC reports persist, so MultiQC
+# still scans results/trimming/).
+outputs:
+  keep_merged_fastq: false
+  keep_trimmed_fastq: false
+
+# Chimera screen settings (see config/config.example.yaml for the meanings).
+# The defaults below match the built-in defaults, so this section is really
+# just exercising the config plumbing on the synthetic test data; the single
+# test TE is enough for junction parsing + counts + sample-QC to run.
+chimera:
+  star:
+    segment_min: 12
+    overhang_min: 12
+    score_drop_max: 20
+    extra: ""
+  breakpoint_tolerance: 0
+  require_canonical_junction: false
+  qc:
+    min_samples_present: 2
+    min_total_counts: 5
+    # 4 test samples, one TE: keep the floor low so the QC plots draw.
+    min_events: 2
+    pca_transform: vst
+  outputs:
+    write_igv_bed: true
+    write_counts_matrix: true
+
+# Tiny resource footprint so the test runs comfortably on a laptop or in CI
+# -- overrides the (much larger) built-in defaults in
+# workflow/default-config/resources.yaml for every rule used by this test.
+resources:
+  cat_fastq: {threads: 1, mem_mb: 500, runtime: 5}
+  trim_galore_pe: {threads: 2, mem_mb: 1000, runtime: 10}
+  gunzip_reference: {threads: 1, mem_mb: 500, runtime: 5}
+  star_index: {threads: 2, mem_mb: 1000, runtime: 10}
+  gtf_to_genepred: {threads: 1, mem_mb: 500, runtime: 5}
+  genepred_to_bed12: {threads: 1, mem_mb: 500, runtime: 5}
+  star_align: {threads: 2, mem_mb: 1000, runtime: 10}
+  samtools_sort: {threads: 1, mem_mb: 500, runtime: 5}
+  samtools_index: {threads: 1, mem_mb: 500, runtime: 5}
+  rseqc_infer_experiment: {threads: 1, mem_mb: 1000, runtime: 5}
+  determine_strandedness: {threads: 1, mem_mb: 1000, runtime: 5}
+  annotation_to_bed: {threads: 1, mem_mb: 500, runtime: 5}
+  parse_chimeric_junctions: {threads: 1, mem_mb: 500, runtime: 5}
+  chimera_counts: {threads: 1, mem_mb: 500, runtime: 5}
+  junction_qc: {threads: 1, mem_mb: 500, runtime: 5}
+  chimera_igv_bed: {threads: 1, mem_mb: 500, runtime: 5}
+  sample_qc_transform: {threads: 1, mem_mb: 1000, runtime: 5}
+  sample_qc: {threads: 1, mem_mb: 1000, runtime: 5}
+  software_versions: {threads: 1, mem_mb: 500, runtime: 5}
+  multiqc: {threads: 1, mem_mb: 500, runtime: 5}

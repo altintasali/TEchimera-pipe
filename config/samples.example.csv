@@ -1,0 +1,40 @@
+# =============================================================================
+# EXAMPLE sample sheet for the STAR + RSeQC + chimera-detection workflow
+# (TEchimera-pipe).
+#
+# To run an analysis, copy this to input/samples.csv and fill in your rows:
+#
+#   cp config/samples.example.csv input/samples.csv
+#
+# input/samples.csv is gitignored (it belongs to your analysis, not the
+# repo). Rows starting with '#' are ignored.
+#
+# Columns (order matters):
+#   sample        unique sample name (no spaces)
+#   fastq_1       read 1 / single-end fastq(.gz); absolute path or relative
+#                 to the repo root (where you run snakemake from)
+#   fastq_2       read 2 fastq(.gz); leave empty for single-end. Paired and
+#                 single-end samples can be mixed.
+#   strandedness  per-sample override: auto, forward, reverse, unstranded,
+#                 or "no". Blank = auto (RSeQC detection).
+#   condition     biological group label, used to color the chimera sample-QC
+#                 PCA/clustering view. Omit/blank it to treat the sample as
+#                 its own group in that view.
+#
+# Lane/run merging (nf-core/rnaseq style): a sample sequenced across
+# multiple lanes or runs is written as one row PER fastq file pair, all with
+# the SAME sample name (see sampleA_rep1 below). Those files are
+# concatenated into one fastq per read before trimming/alignment. Within one
+# sample, every row must agree on strandedness and condition, and each
+# read-pair row must include both fastq_1 and fastq_2 (single-end lanes
+# can't be mixed with paired-end lanes for the same sample).
+# =============================================================================
+sample,fastq_1,fastq_2,strandedness,condition
+sampleA_rep1,reads/sampleA_rep1_L1_R1.fastq.gz,reads/sampleA_rep1_L1_R2.fastq.gz,auto,treatment
+sampleA_rep1,reads/sampleA_rep1_L2_R1.fastq.gz,reads/sampleA_rep1_L2_R2.fastq.gz,auto,treatment
+sampleA_rep2,reads/sampleA_rep2_R1.fastq.gz,reads/sampleA_rep2_R2.fastq.gz,auto,treatment
+sampleA_rep3,reads/sampleA_rep3_R1.fastq.gz,,auto,treatment
+sampleB_rep1,reads/sampleB_rep1_R1.fastq.gz,reads/sampleB_rep1_R2.fastq.gz,auto,control
+sampleB_rep2,reads/sampleB_rep2_R1.fastq.gz,reads/sampleB_rep2_R2.fastq.gz,auto,control
+sampleB_rep3,reads/sampleB_rep3_L1_R1.fastq.gz,,auto,control
+sampleB_rep3,reads/sampleB_rep3_L2_R1.fastq.gz,,auto,control

@@ -1,0 +1,33 @@
+# =============================================================================
+# BUILT-IN DEFAULT tool versions -- part of the workflow itself, loaded
+# automatically. You should NOT normally need to edit this file.
+#
+# To override one or more versions for your own analysis, create
+# input/versions.yaml containing just the keys you want to change (it's
+# deep-merged on top of this file, so a partial override is fine, e.g.
+# just `versions: {star: "2.7.10b"}`). See "Tool versions" in the README.
+#
+# Every tool is pinned independently, as an exact bioconda package version
+# string. Snakemake/conda resolves and downloads the matching build
+# automatically (via `--sdm conda` / `--use-conda`), no manual install
+# required. At workflow parse time, common.smk renders each of these into
+# its own env file under workflow/envs/generated/.
+# =============================================================================
+versions:
+  star: "2.7.11b"
+  # 1.22.1, not 1.23.1: STAR 2.7.11b (the final STAR release) pins
+  # htslib <1.23, and samtools 1.23.x needs htslib >=1.23.1 -- so only
+  # samtools up to 1.22.x can share an environment with STAR.
+  samtools: "1.22.1"
+  # TrimGalore! adapter/quality trimming (nf-core/rnaseq default trimmer).
+  # It depends on cutadapt internally; fastqc is added explicitly for
+  # trim_galore's --fastqc_args (nf-core default) and its MultiQC reports.
+  trim_galore: "0.6.10"
+  fastqc: "0.12.1"
+  rseqc: "5.0.4"
+  multiqc: "1.33"
+  # Chimera sample-QC (PCA / sample clustering), nf-core/rnaseq style.
+  deseq2: "1.46.0"
+  r_base: "4.4"
+  ucsc_gtftogenepred: "482"
+  ucsc_genepredtobed: "482"

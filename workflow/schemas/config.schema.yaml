@@ -1,0 +1,207 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+description: >-
+  Properties of the merged config dict (input/config.yaml +
+  input/versions.yaml, deep-merged by Snakemake's multiple `configfile:`
+  directives -- see workflow/Snakefile).
+type: object
+
+properties:
+  samples:
+    type: string
+  versions:
+    type: object
+    properties:
+      star: {type: string}
+      samtools: {type: string}
+      trim_galore: {type: string}
+      fastqc: {type: string}
+      rseqc: {type: string}
+      multiqc: {type: string}
+      deseq2: {type: string}
+      r_base: {type: string}
+      ucsc_gtftogenepred: {type: string}
+      ucsc_genepredtobed: {type: string}
+    required:
+      - star
+      - samtools
+      - trim_galore
+      - fastqc
+      - rseqc
+      - multiqc
+      - deseq2
+      - r_base
+      - ucsc_gtftogenepred
+      - ucsc_genepredtobed
+  ref:
+    type: object
+    properties:
+      fasta: {type: string}
+      gtf: {type: string}
+      te_gtf: {type: string}
+      sjdb_overhang:
+        type: [string, integer]
+      decompressed_dir:
+        type: string
+        description: >-
+          Directory where gzipped reference files are decompressed before
+          use. Defaults to results/pipeline_info/ref_decompressed (shared
+          storage; the files are temp()-cleaned after downstream rules
+          finish). Must point at shared storage on clusters -- a node-local
+          path like /tmp breaks multi-node runs because the snakemake
+          scheduler cannot see the compute node's output. When gzipped
+          references are present, a node-local or empty value is rejected at
+          parse time with a WorkflowError.
+    required: [fasta, gtf, te_gtf, sjdb_overhang]
+  star:
+    type: object
+    properties:
+      index:
+        type: string
+        description: >-
+          Directory that holds (or will hold) the STAR genome index.
+          Optional -- when absent (or empty), the workflow generates one at
+          results/star_index. An existing directory is honored as-is and only
+          rebuilt when missing (or via `snakemake -R star_index`); point this
+          at a shared/prebuilt index to reuse it.
+      index_extra: {type: string}
+      extra: {type: string}
+      tmpdir:
+        type: string
+        description: >-
+          Directory for STAR's per-run scratch files (the _STARtmp directory;
+          roughly one BAM's worth of data). Defaults to the OS temp dir
+          (/tmp) so the scratch never clutters results/. Point it at a big/
+          fast scratch filesystem on HPC if node-local /tmp is small.
+  trimming:
+    type: object
+    description: >-
+      Optional TrimGalore! adapter/quality trimming before STAR, mirroring
+      the nf-core/rnaseq defaults. Set enabled to false to skip trimming
+      entirely (STAR then reads the merged/raw fastqs directly).
+    properties:
+      enabled:
+        type: boolean
+      trim_nextseq:
+        type: integer
+        minimum: 0
+        description: >-
+          --nextseq=N for Trim Galore!: trim based on quality after removing
+          poly-G tails. Use for NextSeq/NovaSeq data; set 0 to disable.
+      extra:
+        type: string
+        description: Extra command-line arguments passed verbatim to Trim Galore!.
+    required: [enabled]
+  strandedness:
+    type: object
+    description: >-
+      Which mode each sample uses is set per-sample in samples.csv (see
+      samples.schema.yaml); this section only holds the shared
+      auto-detection confidence threshold.
+    properties:
+      min_fraction:
+        type: number
+        minimum: 0
+        maximum: 1
+    required: [min_fraction]
+  chimera:
+    type: object
+    description: >-
+      Chimeric gene-TE junction detection (STAR --chimOutType), per-junction
+      annotation, count matrix, and the chimera sample-QC (PCA / clustering).
+    properties:
+      star:
+        type: object
+        description: STAR chimeric-junction detection parameters.
+        properties:
+          segment_min: {type: integer}
+          overhang_min: {type: integer}
+          score_drop_max: {type: integer}
+          extra:
+            type: string
+            description: Extra verbatim STAR chimeric-alignment flags.
+        required: [segment_min, overhang_min, score_drop_max]
+      breakpoint_tolerance:
+        type: integer
+        minimum: 0
+        description: >-
+          Slack (bp) allowed when matching a STAR chimeric breakpoint to an
+          exon/TE feature edge (annotation coordinate conventions can shift
+          breakpoints by a base or two).
+      require_canonical_junction:
+        type: boolean
+        description: >-
+          Whether to require STAR junction type 1 (GT/AG) for a junction to be
+          classified as gene-TE. TE-involved splicing is often non-canonical,
+          so the default (false) keeps everything and records the type.
+      qc:
+        type: object
+        description: >-
+          Filters applied to the chimera count matrix *for the PCA/clustering
+          view only* -- they never remove events from all_events.tsv or the
+          counts matrix.
+        properties:
+          min_samples_present:
+            type: integer
+            minimum: 1
+          min_total_counts:
+            type: integer
+            minimum: 1
+          min_events:
+            type: integer
+            minimum: 1
+          pca_transform:
+            type: string
+            enum: ["vst", "rlog", "log2"]
+        required: [min_samples_present, min_total_counts, min_events, pca_transform]
+      outputs:
+        type: object
+        description: Which chimera artifacts to write.
+        properties:
+          write_igv_bed:
+            type: boolean
+          write_counts_matrix:
+            type: boolean
+        required: [write_igv_bed, write_counts_matrix]
+    required: [star, breakpoint_tolerance, require_canonical_junction,
+               qc, outputs]
+
+  resources:
+    type: object
+    description: >-
+      Per-rule threads/mem_mb/runtime, loaded from input/resources.yaml.
+      Missing rules/keys fall back to conservative defaults in common.smk.
+    additionalProperties:
+      type: object
+      properties:
+        threads: {type: integer}
+        mem_mb: {type: integer}
+        runtime: {type: integer}
+
+  outputs:
+    type: object
+    description: >-
+      Whether intermediate fastq files are kept after the downstream rules
+      that consume them finish. Setting either to false marks those files as
+      Snakemake temp() outputs -- deleted automatically after the last
+      consumer (alignment) runs -- saving disk on big runs. Both default to
+      true.
+    properties:
+      keep_merged_fastq:
+        type: boolean
+        description: >-
+          Keep the lane-concatenated fastqs (results/fastq/). Note: only
+          meaningful while trimming is enabled -- otherwise STAR reads them
+          directly, so deleting them forces a full re-alignment on the next
+          run.
+      keep_trimmed_fastq:
+        type: boolean
+        description: Keep the TrimGalore!-trimmed fastqs (results/trimming/).
+
+required:
+  - samples
+  - versions
+  - ref
+  - star
+  - trimming
+  - strandedness
+  - chimera

@@ -1,0 +1,9 @@
+sample,fastq_1,fastq_2,strandedness,condition
+treatment_rep1,.tests/reads/treatment_rep1_L001_R1.fastq.gz,.tests/reads/treatment_rep1_L001_R2.fastq.gz,auto,treatment
+treatment_rep1,.tests/reads/treatment_rep1_L002_R1.fastq.gz,.tests/reads/treatment_rep1_L002_R2.fastq.gz,auto,treatment
+treatment_rep2,.tests/reads/treatment_rep2_R1.fastq.gz,.tests/reads/treatment_rep2_R2.fastq.gz,auto,treatment
+control_rep1,.tests/reads/control_rep1_R1.fastq.gz,.tests/reads/control_rep1_R2.fastq.gz,auto,control
+control_rep2,.tests/reads/control_rep2_R1.fastq.gz,.tests/reads/control_rep2_R2.fastq.gz,auto,control
+treatment_rep3,.tests/reads/treatment_rep3_R1.fastq.gz,,auto,treatment
+control_rep3,.tests/reads/control_rep3_L001_R1.fastq.gz,,auto,control
+control_rep3,.tests/reads/control_rep3_L002_R1.fastq.gz,,auto,control

@@ -1,0 +1,161 @@
+# =============================================================================
+# EXAMPLE analysis configuration for the STAR + RSeQC + chimera-detection
+# Snakemake workflow (TEchimera-pipe).
+#
+# This file is a template. To run an analysis, clone the repo, copy it to
+# input/config.yaml and edit:
+#
+#   cp config/config.example.yaml input/config.yaml
+#
+# input/config.yaml and input/samples.csv are gitignored -- they belong to
+# your analysis, not the repo -- so `git pull` will never conflict with them.
+# Tool versions live separately in workflow/default-config/versions.yaml
+# (rarely needs touching; override via input/versions.yaml if ever needed).
+# =============================================================================
+
+# Path to the sample sheet (design file). Relative paths resolve against the
+# directory you run snakemake from (the repo root). Absolute paths always
+# work and are recommended for anything outside the repo.
+samples: input/samples.csv
+
+ref:
+  # Genomic FASTA sequence, e.g. GRCh38 primary assembly. Plain or gzipped
+  # (.fa.gz) both work -- gzipped files are decompressed automatically.
+  # Recommend pointing at shared cluster storage instead of copying, e.g.
+  #   /maps/projects/<group>/shared/refs/GRCh38/genome.fa
+  fasta: input/genome.fa
+  # Gene annotation GTF (Ensembl/GENCODE), used for the STAR index, the RSeQC
+  # BED12 generation, and the gene/exon BED tracks for the chimera screen.
+  # Plain or gzipped (.gtf.gz) both work.
+  gtf: input/genome.gtf
+  # Curated TE GTF file from the TEtranscripts authors, REQUIRED (it is the
+  # source of the TE track the chimera screen overlaps breakpoints against).
+  # Download from https://www.mghlab.org/software/tetranscripts (choose the
+  # file matching your genome build), do NOT use a generic RepeatMasker GTF.
+  # Plain or gzipped (.gtf.gz) both work.
+  te_gtf: input/te_annotation.gtf
+  # sjdbOverhang for the STAR genome index. "auto" (recommended, and the
+  # default) detects it from the sample sheet's fastq files as
+  # max(read length) - 1, STAR's own recommendation -- no need to know your
+  # read length ahead of time, and it adapts automatically if you add
+  # samples with a different read length later. Set an explicit integer
+  # here instead to pin it (e.g. if your fastq files aren't downloaded yet
+  # when you first run the workflow).
+  sjdb_overhang: auto
+  # Where gzipped references (fasta/gtf/te_gtf .gz) are decompressed to.
+  # Defaults to results/pipeline_info/ref_decompressed (shared storage, and
+  # temp()-cleaned once downstream rules are done). Plain, already-unzipped
+  # references skip decompression entirely. Only set this if you want a
+  # different scratch location on shared storage, e.g.
+  #   # decompressed_dir: /scratch/<user>/rnaseq-refs-decompressed
+  # Do NOT point it at node-local /tmp on a cluster: each job runs on a
+  # compute node with its own /tmp, so the snakemake scheduler can't see the
+  # gunzip output ("output ... missing locally, parent dir not present").
+  # While gzipped references are in use, a node-local or empty value is
+  # rejected at startup.
+
+star:
+  # Directory that holds (or will hold) the STAR genome index. Optional:
+  # if you leave it out (or empty), the workflow generates one at
+  # results/star_index. If the index is missing, the workflow builds it
+  # automatically. An existing index is honored as-is (only rebuilt when
+  # missing, or via `snakemake -R star_index`).
+  # Tip: prebuilt indexes are reusable -- point multiple projects at one
+  # shared index, or symlink this directory to it, to skip rebuilding.
+  index: results/star_index
+  # Extra flags for the STAR *index-building* step only. Usually empty --
+  # the main case for setting this is a small/toy genome, where STAR
+  # requires --genomeSAindexNbases min(14, log2(genomeLength)/2 - 1) or
+  # index-building fails (see config/test.yaml for a worked example).
+  index_extra: ""
+  # Extra STAR alignment parameters. The multi-mapper settings below follow
+  # the TEtranscripts authors' recommendations (winAnchorMultimapNmax should
+  # be >= outFilterMultimapNmax, and at least 50):
+  # https://github.com/mhammell-laboratory/TEtranscripts#recommendations-for-tetranscripts-input-files
+  extra: >-
+    --outFilterMultimapNmax 100
+    --winAnchorMultimapNmax 100
+    --outFilterType BySJout
+    --outFilterMultimapScoreRange 1
+    --sjdbScore 1
+  # Directory for STAR's per-run scratch files (its _STARtmp directory,
+  # roughly one BAM's worth of data). Defaults to the OS temp dir (/tmp), so
+  # the scratch never clutters results/ and is auto-deleted after each run.
+  # On HPC, if node-local /tmp is small, point this at a scratch filesystem
+  # with enough free space instead, e.g. /scratch/<user>/star_tmp.
+  tmpdir: /tmp
+
+trimming:
+  # Optional TrimGalore! adapter/quality trimming before STAR, mirroring the
+  # nf-core/rnaseq defaults (Trim Galore! is nf-core's default trimmer, run
+  # with --paired/--gzip and FastQC executed inside via --fastqc_args). Set
+  # enabled: false to skip trimming entirely -- STAR then reads the merged/
+  # raw fastqs directly, and the MultiQC report keeps the always-on raw-input
+  # FastQC section but drops the trimming/trimmed-FastQC ones.
+  enabled: true
+  # --nextseq=N: trim from the 3' end after removing poly-G tails, the
+  # recommended setting for NextSeq/NovaSeq data. Leave at 0 for standard
+  # Illumina (HiSeq/MiSeq) libraries.
+  trim_nextseq: 0
+  # Extra command-line arguments passed verbatim to Trim Galore!. E.g. to
+  # additionally clip 3' bases: --clip_r1 1 --clip_r2 1
+  extra: ""
+
+strandedness:
+  # Whether/which samples get RSeQC auto-detection is controlled per-sample
+  # by the "strandedness" column in samples.csv (auto/forward/reverse/
+  # unstranded; blank = auto). The only workflow-wide knob left here is the
+  # confidence threshold used whenever auto-detection runs: if the fraction
+  # of reads supporting the called strand is below this value, the library
+  # is called "no" (unstranded) rather than guessing.
+  min_fraction: 0.6
+
+chimera:
+  # Chimeric gene-TE junction detection (STAR --chimOutType Junctions
+  # WithinBAM SoftClip), per-junction annotation, and the chimera sample-QC
+  # (PCA / sample clustering). See the "Chimera screen" section of the
+  # README for the pipeline flow and output layout.
+  star:
+    # STAR chimeric-alignment detection parameters. The defaults below are
+    # the TEtranscripts authors' recommendations for the gene-TE chimera
+    # context (from their STAR settings).
+    segment_min: 12
+    overhang_min: 12
+    score_drop_max: 20
+    # Extra verbatim STAR chimeric-alignment flags (usually empty).
+    extra: ""
+  # Slack (bp) allowed when matching a STAR chimeric breakpoint to an
+  # exon/TE feature edge (annotation coordinate conventions can shift
+  # breakpoints by a base or two).
+  breakpoint_tolerance: 0
+  # Whether to require STAR junction type 1 (GT/AG) for a junction to be
+  # classified as gene-TE. TE-involved splicing is often non-canonical, so
+  # the default (false) keeps everything and records the type.
+  require_canonical_junction: false
+  qc:
+    # Filters applied to the chimera count matrix *for the PCA/clustering
+    # view only* -- they never remove events from all_events.tsv or the
+    # counts matrix. min_events is the floor for drawing the QC plots.
+    min_samples_present: 2
+    min_total_counts: 5
+    min_events: 10
+    # Count-matrix transformation for the QC view: vst / rlog (DESeq2) or
+    # log2 (log2(x+1), no DESeq2).
+    pca_transform: vst
+  outputs:
+    # Which chimera artifacts to write. The per-sample junction tables, the
+    # all-events catalog, the counts matrix, and the junction-QC summaries
+    # are always written; these toggles cover the optional extras.
+    write_igv_bed: false
+    write_counts_matrix: true
+
+outputs:
+  # Whether intermediate fastq files are kept after the downstream rules that
+  # consume them finish. Setting either to false marks those files as
+  # Snakemake temp() outputs -- deleted automatically once alignment is done
+  # with them -- saving disk on big runs. Both default to true.
+  # Note: keep_merged_fastq: false only makes sense while trimming is enabled
+  # (otherwise STAR reads the merged fastqs directly, so deleting them forces
+  # a full re-alignment on the next run).
+  keep_merged_fastq: true
+  keep_trimmed_fastq: true

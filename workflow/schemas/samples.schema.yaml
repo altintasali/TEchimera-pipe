@@ -1,0 +1,35 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+description: row of input/samples.csv
+type: object
+
+properties:
+  sample:
+    type: string
+    description: unique sample identifier, used throughout the workflow
+  fastq_1:
+    type: string
+    description: path to read 1 (or single-end) fastq(.gz) file
+  fastq_2:
+    type: [string, "null"]
+    description: >-
+      path to read 2 fastq(.gz) file. Optional per-sample: leave empty for a
+      single-end sample. A sample sheet can freely mix paired-end and
+      single-end samples.
+  strandedness:
+    type: [string, "null"]
+    description: >-
+      Optional per-sample library strandedness override, using nf-core/
+      rnaseq's vocabulary so an nf-core samplesheet can be used directly:
+      "auto" (RSeQC auto-detection), "forward", "reverse", or "unstranded"
+      ("no" is also accepted). Leave empty to fall back to
+      strandedness.mode in config.yaml for that sample.
+  condition:
+    type: [string, "null"]
+    description: >-
+      Optional. Biological condition/group label. Used to color the chimera
+      sample-QC view (PCA + clustering heatmap); samples without a condition
+      are treated as one group.
+
+required:
+  - sample
+  - fastq_1
