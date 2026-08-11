@@ -105,14 +105,19 @@ do_transform <- function(argv) {
 }
 
 do_plots <- function(argv) {
-    suppressMessages(library(pheatmap))
     matrix_path <- argv[2]
     samples_path <- argv[3]
     min_events <- as.integer(argv[4])
     out_pca <- argv[5]
     out_heatmap <- argv[6]
 
-    tmat <- as.matrix(read.delim(matrix_path, row.names = 1, check.names = FALSE))
+    sz <- file.info(matrix_path)$size
+    tmat <- if (!is.na(sz) && sz > 0) {
+        as.matrix(read.delim(matrix_path, row.names = 1, check.names = FALSE))
+    } else {
+        # the transform writes a 0-byte file when nothing passed its QC filter
+        matrix(nrow = 0, ncol = 0)
+    }
     placeholder <- function(msg) {
         message(msg)
         for (p in c(out_pca, out_heatmap)) {
@@ -167,6 +172,8 @@ do_plots <- function(argv) {
     })
 
     annot <- data.frame(row.names = samples, condition = groups)
+    # Loaded lazily: the placeholder path above never needs pheatmap.
+    suppressMessages(library(pheatmap))
     write_svg(out_heatmap, 8, 8, {
         pheatmap(tmat, annotation_col = annot, show_colnames = TRUE,
                  show_rownames = FALSE, main = "Chimera sample-QC: clustering")

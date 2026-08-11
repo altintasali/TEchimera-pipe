@@ -24,6 +24,7 @@ dependencies:
   - rseqc=5.0.4
   - multiqc=1.33
   - bioconductor-deseq2=1.46.0
+  - r-pheatmap=1.0.12
   - r-base=4.4
   - ucsc-gtftogenepred=482
   - ucsc-genepredtobed=482

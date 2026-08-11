@@ -28,6 +28,7 @@ versions:
   multiqc: "1.33"
   # Chimera sample-QC (PCA / sample clustering), nf-core/rnaseq style.
   deseq2: "1.46.0"
+  pheatmap: "1.0.12"
   r_base: "4.4"
   ucsc_gtftogenepred: "482"
   ucsc_genepredtobed: "482"
