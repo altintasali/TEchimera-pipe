@@ -38,22 +38,44 @@ transform_matrix <- function(counts, method) {
         stop("need >= 2 samples for vst/rlog")
     }
     if (method == "vst") {
-        # vst() on a matrix with fewer rows than DESeq2's internal nsub
-        # errors out; the direct varianceStabilizingTransformation() handles
-        # small event sets (common for gene-TE chimeras) fine.
         tryCatch(
             vst(counts, blind = TRUE),
-            error = function(e)
-                varianceStabilizingTransformation(counts, blind = TRUE)
+            error = function(e) transform_fallback(counts, method, e)
         )
     } else if (method == "rlog") {
         tryCatch(
             rlog(counts, blind = TRUE),
-            error = function(e) rlogTransformation(counts, blind = TRUE)
+            error = function(e) transform_fallback(counts, method, e)
         )
     } else {
         stop(paste("unknown transform:", method))
     }
+}
+
+transform_fallback <- function(counts, method, orig_error) {
+    # vst()/rlog() fail on small matrices (fewer rows than DESeq2's nsub);
+    # the direct *Transformation() calls handle those but can still choke when
+    # every event's gene-wise dispersion sits at the minimum (curve fitting
+    # gives up), which happens easily with a handful of chimeric junctions.
+    direct <- if (method == "vst") {
+        tryCatch(
+            varianceStabilizingTransformation(counts, blind = TRUE),
+            error = function(e) NULL
+        )
+    } else {
+        tryCatch(
+            rlogTransformation(counts, blind = TRUE),
+            error = function(e) NULL
+        )
+    }
+    if (!is.null(direct)) {
+        return(as.matrix(direct))
+    }
+    message(sprintf(
+        "%s unavailable for %d events (both vst/rlog and the direct varianceStabilizingTransformation/rlogTransformation failed: %s); falling back to log2(counts + 1) for the QC view",
+        method, nrow(counts), conditionMessage(orig_error)
+    ))
+    log2(counts + 1)
 }
 
 load_conditions <- function(samples_path) {
