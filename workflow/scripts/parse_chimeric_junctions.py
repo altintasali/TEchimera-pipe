@@ -152,12 +152,12 @@ def main():
                 continue
             chrom = cols[0]
             try:
-                donor_bp, acceptor_bp = int(cols[1]), int(cols[3])
+                donor_bp, acceptor_bp = int(cols[1]), int(cols[4])
             except ValueError:
                 continue
-            donor_strand, acceptor_strand = cols[2], cols[4]
-            jtype = cols[5]
-            repeat_flag = cols[6]
+            donor_strand, acceptor_strand = cols[2], cols[5]
+            jtype = cols[6]
+            repeat_flag = cols[7]
 
             d0, d1 = locus(donor_bp)
             a0, a1 = locus(acceptor_bp)
